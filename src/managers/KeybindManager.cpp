@@ -1093,7 +1093,7 @@ void CKeybindManager::moveActiveToWorkspaceSilent(std::string args) {
         if (const auto PATCOORDS = g_pCompositor->vectorToWindowUnified(OLDMIDDLE, RESERVED_EXTENTS | INPUT_EXTENTS | ALLOW_FLOATING, PWINDOW); PATCOORDS)
             g_pCompositor->focusWindow(PATCOORDS);
         else
-            g_pInputManager->refocus();
+            g_pInputManager->simulateMouseMovement();
     }
 }
 
