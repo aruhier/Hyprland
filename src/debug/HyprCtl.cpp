@@ -218,7 +218,7 @@ std::string                                                       CHyprCtl::getT
 
 std::string CHyprCtl::getMonitorData(PHLMONITOR m, eHyprCtlOutputFormat format) {
     std::string result;
-    if (!m->m_output || m->m_id == -1)
+    if (!m->m_output || !m->m_output->state || m->m_id == -1)
         return "";
 
     if (format == eHyprCtlOutputFormat::FORMAT_JSON) {
