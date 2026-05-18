@@ -11,8 +11,9 @@ eMonitorRuleComparisonResult CMonitorRule::compare(const CMonitorRule& other) co
     const auto SAME_SCALE        = m_scale == other.m_scale; // scale is hard due to checks
     const auto SAME_BITNESS      = other.m_enable10bit == m_enable10bit;
     const auto SAME_DRM_MODELINE = !std::memcmp(&m_drmMode, &other.m_drmMode, sizeof(m_drmMode));
+    const auto SAME_DISABLED     = m_disabled == other.m_disabled;
 
-    if (!SAME_RES || !SAME_REFRESH || !SAME_SCALE || !SAME_BITNESS || !SAME_DRM_MODELINE)
+    if (!SAME_RES || !SAME_REFRESH || !SAME_SCALE || !SAME_BITNESS || !SAME_DRM_MODELINE || !SAME_DISABLED)
         return COMPARISON_NO_MATCH;
 
     // Soft props

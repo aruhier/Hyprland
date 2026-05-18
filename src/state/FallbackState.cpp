@@ -119,10 +119,10 @@ void CFallbackStateKeeper::setFallbackActive(bool enabled) {
     if (enabled == m_fallbackActive)
         return;
 
+    m_fallbackActive = enabled;
+
     if (m_fallbackStateUpdateDeferred)
         return;
-
-    m_fallbackActive = enabled;
 
     g_pEventLoopManager->doLater([this] {
         m_fallbackStateUpdateDeferred = false;
