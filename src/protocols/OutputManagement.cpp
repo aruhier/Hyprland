@@ -181,33 +181,41 @@ void COutputHead::sendAllData() {
 }
 
 void COutputHead::updateMode() {
-    m_resource->sendEnabled(m_monitor->m_enabled);
+    auto monitor = m_monitor.lock();
+    if (!monitor)
+        return;
 
-    if (m_monitor->m_enabled) {
-        m_resource->sendPosition(m_monitor->m_position.x, m_monitor->m_position.y);
-        m_resource->sendTransform(m_monitor->m_transform);
-        m_resource->sendScale(wl_fixed_from_double(m_monitor->m_scale));
+    m_resource->sendEnabled(monitor->m_enabled);
+
+    if (monitor->m_enabled) {
+        m_resource->sendPosition(monitor->m_position.x, monitor->m_position.y);
+        m_resource->sendTransform(monitor->m_transform);
+        m_resource->sendScale(wl_fixed_from_double(monitor->m_scale));
     }
 
     if (m_resource->version() >= 4)
-        m_resource->sendAdaptiveSync(m_monitor->m_vrrActive ? ZWLR_OUTPUT_HEAD_V1_ADAPTIVE_SYNC_STATE_ENABLED : ZWLR_OUTPUT_HEAD_V1_ADAPTIVE_SYNC_STATE_DISABLED);
+        m_resource->sendAdaptiveSync(monitor->m_vrrActive ? ZWLR_OUTPUT_HEAD_V1_ADAPTIVE_SYNC_STATE_ENABLED : ZWLR_OUTPUT_HEAD_V1_ADAPTIVE_SYNC_STATE_DISABLED);
 
-    if (m_monitor->m_enabled) {
+    if (monitor->m_enabled) {
         for (auto const& mw : m_modes) {
             auto m = mw.lock();
 
             if (!m)
                 continue;
 
-            if (m->m_mode == m_monitor->m_currentMode) {
+            if (m->m_mode == monitor->m_currentMode) {
                 if (m->m_mode)
-                    LOGM(Log::DEBUG, "  | sending current mode for {}: {}x{}@{}", m_monitor->m_name, m->m_mode->pixelSize.x, m->m_mode->pixelSize.y, m->m_mode->refreshRate);
+                    LOGM(Log::DEBUG, "  | sending current mode for {}: {}x{}@{}", monitor->m_name, m->m_mode->pixelSize.x, m->m_mode->pixelSize.y, m->m_mode->refreshRate);
                 else
-                    LOGM(Log::DEBUG, "  | sending current mode for {}: null (fake)", m_monitor->m_name);
+                    LOGM(Log::DEBUG, "  | sending current mode for {}: null (fake)", monitor->m_name);
                 m_resource->sendCurrentMode(m->m_resource.get());
                 break;
             }
         }
+    }
+
+    for (auto const& m : PROTO::outputManagement->m_managers) {
+        m->sendDone();
     }
 }
 
@@ -419,9 +427,10 @@ bool COutputConfiguration::applyTestConfiguration(bool test) {
         // reset properties for next set.
         head->m_state.committedProperties = 0;
 
-        Config::monitorRuleMgr()->scheduleReload();
-
         m_owner->m_monitorStates[PMONITOR->m_name] = newState;
+
+        Config::monitorRuleMgr()->scheduleReload();
+        Config::monitorRuleMgr()->ensureMonitorStatus();
     }
 
     LOGM(Log::DEBUG, "Saved configuration");
@@ -617,9 +626,24 @@ void COutputManagementProtocol::destroyResource(COutputConfigurationHead* resour
 
 void COutputManagementProtocol::updateAllOutputs() {
     for (auto const& m : State::monitorState()->allMonitors()) {
+        if (m->m_isUnsafeFallback)
+            continue;
+
         for (auto const& mgr : m_managers) {
             mgr->ensureMonitorSent(m);
         }
+    }
+
+    for (auto const& h : m_heads) {
+        if (h) {
+            auto mon = h->m_monitor.lock();
+            if (mon)
+                h->updateMode();
+        }
+    }
+
+    for (auto const& mgr : m_managers) {
+        mgr->sendDone();
     }
 }
 

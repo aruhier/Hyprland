@@ -167,12 +167,23 @@ void CMonitor::onConnect(bool noRule) {
     m_listeners.destroy = m_output->events.destroy.listen([this] {
         Log::logger->log(Log::DEBUG, "Destroy called for monitor {}", m_name);
 
-        onDisconnect(true);
-
-        m_output              = nullptr;
         m_renderingInitPassed = false;
 
-        State::monitorState()->remove(m_self.lock());
+        // Disconnect all listeners immediately to prevent recursive/duplicate signal loops during teardown!
+        m_listeners.destroy.reset();
+        m_listeners.frame.reset();
+        m_listeners.commit.reset();
+        m_listeners.needsFrame.reset();
+        m_listeners.state.reset();
+
+        SP<CMonitor> keepMonAlive = m_self.lock();
+        SP<Aquamarine::IOutput> keepOutputAlive = m_output;
+
+        State::monitorState()->remove(keepMonAlive);
+        onDisconnect(true);
+        m_output = nullptr;
+
+        g_pEventLoopManager->doLater([keepMonAlive, keepOutputAlive] {});
     });
 
     m_listeners.state = m_output->events.state.listen([this](const Aquamarine::IOutput::SStateEvent& event) {
@@ -299,9 +310,11 @@ void CMonitor::onConnect(bool noRule) {
         }
     }
 
-    m_scale = monitorRule.m_scale;
-    if (m_scale < 0.1)
-        m_scale = getDefaultScale();
+    if (noRule) {
+        m_scale = monitorRule.m_scale;
+        if (m_scale < 0.1)
+            m_scale = getDefaultScale();
+    }
 
     m_forceFullFrames = 3; // force 3 full frames to make sure there is no blinking due to double-buffering.
     //
@@ -352,6 +365,7 @@ void CMonitor::onConnect(bool noRule) {
     g_pEventManager->postEvent(SHyprIPCEvent{"monitoradded", m_name});
     g_pEventManager->postEvent(SHyprIPCEvent{"monitoraddedv2", std::format("{},{},{}", m_id, m_name, m_shortDescription)});
     Event::bus()->m_events.monitor.added.emit(m_self.lock());
+    m_events.modeChanged.emit();
 }
 
 void CMonitor::onDisconnect(bool destroy) {
@@ -644,18 +658,7 @@ bool CMonitor::applyMonitorRule(Config::CMonitorRule&& pMonitorRule) {
     if (m_output->nonDesktop)
         return true;
 
-    bool autoScale = false;
-
-    if (RULE->m_scale > 0.1)
-        m_scale = RULE->m_scale;
-    else {
-        autoScale               = true;
-        const auto DEFAULTSCALE = getDefaultScale();
-        m_scale                 = DEFAULTSCALE;
-    }
-
-    m_setScale  = m_scale;
-    m_transform = RULE->m_transform;
+    m_output->state->setEnabled(true);
 
     // accumulate requested modes in reverse order (cause inesrting at front is inefficient)
     std::vector<SP<Aquamarine::SOutputMode>> requestedModes;
@@ -950,6 +953,17 @@ bool CMonitor::applyMonitorRule(Config::CMonitorRule&& pMonitorRule) {
         }
     }
 
+    bool autoScale = false;
+    if (RULE->m_scale > 0.1) {
+        m_scale = RULE->m_scale;
+    } else {
+        autoScale               = true;
+        const auto DEFAULTSCALE = getDefaultScale();
+        m_scale                 = DEFAULTSCALE;
+    }
+    m_setScale  = m_scale;
+    m_transform = RULE->m_transform;
+
     Vector2D logicalSize = m_pixelSize / m_scale;
     if (!*PDISABLESCALECHECKS && (logicalSize.x != std::round(logicalSize.x) || logicalSize.y != std::round(logicalSize.y))) {
         // invalid scale, will produce fractional pixels.
@@ -1233,8 +1247,8 @@ void CMonitor::setMirror(const std::string& mirrorOf) {
 }
 
 float CMonitor::getDefaultScale() {
-    if (!m_enabled)
-        return 1;
+    if (!m_output || m_pixelSize.x < 1.0 || m_pixelSize.y < 1.0 || m_output->physicalSize.x < 1.0 || m_output->physicalSize.y < 1.0)
+        return 1.0;
 
     static constexpr double MMPERINCH = 25.4;
 
